@@ -367,7 +367,7 @@ parameters:
   - name: NEXTCLOUD_IMAGE_NAME
     displayName: Nextcloud Docker Image
     description: The name of the Nextcloud Docker image used within the OpenShift deployment.
-    value: docker.io/nextcloud:latest
+    value: docker.io/nextcloud/aio-apache:latest
   - name: NEXTCLOUD_VOLUME_CAPACITY
     displayName: Nextcloud Volume Capacity
     description: >-
