@@ -1,0 +1,380 @@
+---
+kind: Template
+apiVersion: template.openshift.io/v1
+
+metadata:
+  name: nextcloud-persistent
+  annotations:
+    openshift.io/display-name: Nextcloud
+    description: >-
+      A deployment for Nextcloud with MariaDB and Redis, including persistent
+      storage.
+    iconClass: icon-php
+    tags: instant-app,php,nextcloud,mariadb,redis
+    openshift.io/provider-display-name: "Nextcloud GmbH"
+
+message: >-
+  A Nextcloud service including persistent storage has been created in your
+  project.
+
+objects:
+  - kind: ServiceAccount
+    apiVersion: v1
+    metadata:
+      name: nextcloud
+  - kind: Route
+    apiVersion: v1
+    metadata:
+      name: nextcloud
+    spec:
+      host: "${NEXTCLOUD_PUBLIC_DOMAIN}"
+      to:
+        kind: Service
+        name: nextcloud
+      tls:
+        termination: edge
+        insecureEdgeTerminationPolicy: Redirect
+      port:
+        targetPort: http
+  - kind: PersistentVolumeClaim
+    apiVersion: v1
+    metadata:
+      name: nextcloud
+    spec:
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: "${NEXTCLOUD_VOLUME_CAPACITY}"
+  - kind: Service
+    apiVersion: v1
+    metadata:
+      name: nextcloud
+    spec:
+      ports:
+        - name: http
+          protocol: TCP
+          port: 8080
+          targetPort: http
+      selector:
+        app: nextcloud
+  - kind: DeploymentConfig
+    apiVersion: v1
+    metadata:
+      name: nextcloud
+      labels:
+        app: nextcloud
+    spec:
+      strategy:
+        type: Recreate
+      triggers:
+        - type: ConfigChange
+      replicas: 1
+      selector:
+        app: nextcloud
+      template:
+        metadata:
+          name: nextcloud
+          labels:
+            app: nextcloud
+        spec:
+          hostname: nextcloud
+          serviceAccount: nextcloud
+          containers:
+            - name: nextcloud
+              image: "${NEXTCLOUD_IMAGE_NAME}"
+              imagePullPolicy: Always
+              ports:
+                - name: http
+                  protocol: TCP
+                  containerPort: 8080
+              readinessProbe:
+                timeoutSeconds: 3
+                initialDelaySeconds: 60
+                failureThreshold: 60
+                exec:
+                  command:
+                    - "/usr/bin/healthcheck"
+              livenessProbe:
+                timeoutSeconds: 3
+                initialDelaySeconds: 60
+                failureThreshold: 30
+                exec:
+                  command:
+                    - "/usr/bin/healthcheck"
+              env:
+                - name: NEXTCLOUD_DOMAIN
+                  value: "${NEXTCLOUD_PUBLIC_DOMAIN}"
+                - name: NEXTCLOUD_PROTOCOL
+                  value: https
+                - name: NEXTCLOUD_CROND_ENABLED
+                  value: "false"
+                - name: NEXTCLOUD_BACKGROUND_MODE
+                  value: webcron
+                - name: NEXTCLOUD_DB_TYPE
+                  value: mysql
+                - name: NEXTCLOUD_DB_HOST
+                  value: mariadb
+                - name: NEXTCLOUD_DB_NAME
+                  value: nextcloud
+                - name: NEXTCLOUD_DB_USERNAME
+                  value: nextcloud
+                - name: NEXTCLOUD_DB_PASSWORD
+                  value: nextcloud
+                - name: NEXTCLOUD_REDIS_ENABLED
+                  value: "true"
+                - name: NEXTCLOUD_REDIS_HOST
+                  value: redis
+                - name: NEXTCLOUD_REDIS_PORT
+                  value: "6379"
+                - name: NEXTCLOUD_VOLUME_ROOT
+                  value: "/var/lib/nextcloud"
+                - name: NEXTCLOUD_LOG_FILE
+                  value: "/dev/stdout"
+                - name: NEXTCLOUD_ADMIN_USERNAME
+                  value: "${NEXTCLOUD_ADMIN_USERNAME}"
+                - name: NEXTCLOUD_ADMIN_PASSWORD
+                  value: "${NEXTCLOUD_ADMIN_PASSWORD}"
+                - name: NEXTCLOUD_SESSION_SAVE_HANDLER
+                  value: redis
+                - name: NEXTCLOUD_SESSION_SAVE_PATH
+                  value: tcp://redis:6379?database=1
+                - name: NEXTCLOUD_SKIP_CHOWN
+                  value: "true"
+              volumeMounts:
+                - name: data
+                  mountPath: "/var/lib/nextcloud"
+              securityContext:
+                allowPrivilegeEscalation: false
+          volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: nextcloud
+  - kind: PersistentVolumeClaim
+    apiVersion: v1
+    metadata:
+      name: mariadb
+    spec:
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 10Gi
+  - kind: Service
+    apiVersion: v1
+    metadata:
+      name: mariadb
+    spec:
+      ports:
+        - name: mariadb
+          protocol: TCP
+          port: 3306
+          targetPort: mariadb
+      selector:
+        app: mariadb
+  - kind: DeploymentConfig
+    apiVersion: v1
+    metadata:
+      name: mariadb
+    spec:
+      strategy:
+        type: Recreate
+      triggers:
+        - type: ConfigChange
+      replicas: 1
+      selector:
+        app: mariadb
+      template:
+        metadata:
+          name: mariadb
+          labels:
+            app: mariadb
+        spec:
+          hostname: mariadb
+          containers:
+            - name: mariadb
+              image: docker.io/mariadb:10.5
+              imagePullPolicy: Always
+              ports:
+                - name: mariadb
+                  protocol: TCP
+                  containerPort: 3306
+              env:
+                - name: MYSQL_ROOT_PASSWORD
+                  value: nextcloud
+                - name: MYSQL_USER
+                  value: nextcloud
+                - name: MYSQL_PASSWORD
+                  value: nextcloud
+                - name: MYSQL_DATABASE
+                  value: nextcloud
+              volumeMounts:
+                - name: data
+                  mountPath: "/var/lib/mysql"
+              securityContext:
+                allowPrivilegeEscalation: false
+            - name: healthcheck
+              image: docker.io/healthcheck/mysql:latest
+              imagePullPolicy: Always
+              command:
+                - "/bin/bash"
+                - "-c"
+              args:
+                - "trap : TERM INT; sleep infinity & wait"
+              env:
+                - name: MYSQL_USER
+                  value: root
+                - name: MYSQL_PASSWORD
+                  value: nextcloud
+              readinessProbe:
+                timeoutSeconds: 3
+                initialDelaySeconds: 60
+                failureThreshold: 30
+                exec:
+                  command:
+                    - "/usr/local/bin/docker-healthcheck"
+              livenessProbe:
+                timeoutSeconds: 3
+                initialDelaySeconds: 60
+                failureThreshold: 30
+                exec:
+                  command:
+                    - "/usr/local/bin/docker-healthcheck"
+          volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: mariadb
+  - kind: PersistentVolumeClaim
+    apiVersion: v1
+    metadata:
+      name: redis
+    spec:
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 1Gi
+  - kind: Service
+    apiVersion: v1
+    metadata:
+      name: redis
+    spec:
+      ports:
+        - name: redis
+          protocol: TCP
+          port: 6379
+          targetPort: redis
+      selector:
+        app: redis
+  - kind: DeploymentConfig
+    apiVersion: v1
+    metadata:
+      name: redis
+      labels:
+        app: redis
+    spec:
+      strategy:
+        type: Recreate
+      triggers:
+        - type: ConfigChange
+      replicas: 1
+      selector:
+        app: redis
+      template:
+        metadata:
+          name: redis
+          labels:
+            app: redis
+        spec:
+          hostname: redis
+          containers:
+            - name: redis
+              image: docker.io/redis:6.0
+              imagePullPolicy: Always
+              ports:
+                - name: redis
+                  protocol: TCP
+                  containerPort: 6379
+              volumeMounts:
+                - name: data
+                  mountPath: "/data"
+              securityContext:
+                allowPrivilegeEscalation: false
+            - name: healthcheck
+              image: docker.io/healthcheck/redis:latest
+              imagePullPolicy: Always
+              command:
+                - "/bin/bash"
+                - "-c"
+              args:
+                - "trap : TERM INT; sleep infinity & wait"
+              readinessProbe:
+                timeoutSeconds: 3
+                initialDelaySeconds: 60
+                failureThreshold: 30
+                exec:
+                  command:
+                    - "/usr/local/bin/docker-healthcheck"
+              livenessProbe:
+                timeoutSeconds: 3
+                initialDelaySeconds: 60
+                failureThreshold: 30
+                exec:
+                  command:
+                    - "/usr/local/bin/docker-healthcheck"
+          volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: redis
+  - kind: CronJob
+    apiVersion: batch/v1beta1
+    metadata:
+      name: webcron
+    spec:
+      schedule: "*/15 * * * *"
+      successfulJobsHistoryLimit: 0
+      failedJobsHistoryLimit: 5
+      jobTemplate:
+        spec:
+          template:
+            spec:
+              restartPolicy: OnFailure
+              containers:
+                - name: webcron
+                  image: "${NEXTCLOUD_IMAGE_NAME}"
+                  args:
+                    - curl
+                    - http://nextcloud:8080/cron.php
+
+parameters:
+  - name: nextcloud_PUBLIC_DOMAIN
+    displayName: Nextcloud Domain
+    description: The domain where you want to reach Nextcloud after the deployment.
+    value: ""
+    required: true
+  - name: NEXTCLOUD_ADMIN_USERNAME
+    displayName: Nextcloud Admin Username
+    description: >-
+      The username for the initial admin user, can be changed later within
+      Nextcloud.
+    value: admin
+  - name: NEXTCLOUD_ADMIN_PASSWORD
+    displayName: Nextcloud Admin Password
+    description: >-
+      The password for the initial admin user, can be changed later within
+      nextcloud.
+    value: admin
+  - name: NEXTCLOUD_IMAGE_NAME
+    displayName: Nextcloud Docker Image
+    description: The name of the Nextcloud Docker image used within the OpenShift deployment.
+    value: docker.io/nextcloud/nextcloud:latest
+  - name: NEXTCLOUD_VOLUME_CAPACITY
+    displayName: Nextcloud Volume Capacity
+    description: >-
+      Volume space available for data to store Nextcloud assets, e.g. 512Mi,
+      2Gi.
+    value: 100Gi
+    required: true
+
+labels:
+  template: nextcloud-persistent-template
