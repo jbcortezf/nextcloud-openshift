@@ -159,7 +159,7 @@ objects:
         - ReadWriteOnce
       resources:
         requests:
-          storage: 10Gi
+          storage: 5Gi
   - kind: Service
     apiVersion: v1
     metadata:
@@ -193,7 +193,7 @@ objects:
           hostname: mariadb
           containers:
             - name: mariadb
-              image: docker.io/mariadb:10.5
+              image: docker.io/mariadb:latest
               imagePullPolicy: Always
               ports:
                 - name: mariadb
@@ -367,13 +367,13 @@ parameters:
   - name: NEXTCLOUD_IMAGE_NAME
     displayName: Nextcloud Docker Image
     description: The name of the Nextcloud Docker image used within the OpenShift deployment.
-    value: docker.io/nextcloud/all-in-one:latest
+    value: docker.io/nextcloud/apache:latest
   - name: NEXTCLOUD_VOLUME_CAPACITY
     displayName: Nextcloud Volume Capacity
     description: >-
       Volume space available for data to store Nextcloud assets, e.g. 512Mi,
-      2Gi.
-    value: 100Gi
+      1Gi.
+    value: 1Gi
     required: true
 
 labels:
